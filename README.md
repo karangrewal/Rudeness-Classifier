@@ -53,7 +53,7 @@ Class labels correspond to:
 | rude_52 | R     | The Social Network		| 86:38	  | Gentleman interrupts conversation		|
 | rude_53 | S     | The Social Network		| 63:47	  | One man raises voice during argument	|
 | rude_54 | I     | The Social Network		| 75:34	  | Woman says 'Go to hell' to man			|
-| rude_55 | R     | The Social Network		| 103:52  | Man shouts and insults another			|
+| rude_55 | S     | The Social Network		| 103:52  | Man shouts and insults another			|
 | rude_56 | I     | The Social Network		| 104:19  | Verbal insult and threat				|
 | rude_57 | N     | Modern Family, S1E9		| 2:09	  | Non-rude Argument						|
 | rude_58 | I     | Modern Family, S1E12	| 13:37	  | Girls have argument; showing attitude	|
@@ -70,7 +70,7 @@ Class labels correspond to:
 | rude_69 |	I	  | Modern Family, S8E5 	| 8:11	  | Girl tells boy to shutup				|
 | rude_70 |	I	  | Wolf of Wall Street 	|		  | Name-calling to face					|
 | rude_71 |	I	  | Wolf of Wall Street 	|		  | Woman makes sexual joke					|
-| rude_72 |	I	  | Wolf of Wall Street 	|		  | Man loses his patience with other man	|
+| rude_72 |	S	  | Wolf of Wall Street 	|		  | Man loses his patience with other man	|
 | rude_73 |	I	  | Wolf of Wall Street 	|		  | Woman calls man a "lying piece of sh*t"	|
 | rude_74 |	S	  | Wolf of Wall Street 	|		  | Man starts shouting at employee			|
 | rude_75 |	I	  | Wolf of Wall Street 	|		  | Man abruptly tells other to go away		|
