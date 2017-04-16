@@ -1,32 +1,31 @@
-'''
-NOTE: original file ~/downloads/LIBSVM-3.21/python/classify.py
+"""
+Note: original file ~/downloads/LIBSVM-3.21/python/classify.py
 
-usage: `python classify.py <reuse>`
-
-mfcc: train SVM classifier using MFCC values.
-mfcc_de: train SVM classifier using MFCC delta (velocity) values.
-mfcc_de_de: train SVM classifier using MFCC delta delta (acceleration) values.
+New Classify.py: train SVM based on:
+- MFCC acceleration features
+- Prosodic features
+- Both
 
 Arguments:
-
-
-'''
+0 -- train on MFCC acceleration features
+1 -- train on Prosodic features
+2 -- train on both
+3 -- train on all MFCC features (39 in total)
+"""
 
 import numpy as np
 from scipy import stats
 from svmutil import *
+
 import os
 import sys
 
-# Smoothing buffer size
-B = 21
-LIBSVM = '/Users/karangrewal/downloads/libsvm-3.21/python'
-PATH = '/Users/karangrewal/documents/developer/rudeness-classifier/conversations/'
+# Global Variables
+LIBSVM = '<path-to-libsvm-folder>'
+PATH = '<path-to-local-folder>'
 
-# Test Examples
-TEST_CASES = ['rude_37.csv', 'rude_49.csv', 'rude_51.csv', 'rude_72.csv']
-
-def smooth(y_test, buf_size):
+def smooth(y_test):
+	buf_size = 19
 	buf_size = 1. * buf_size / 2
 	y_test = np.array(y_test)
 	smooth = np.zeros(y_test.shape[0])
@@ -36,149 +35,240 @@ def smooth(y_test, buf_size):
 
 	return smooth
 
-def get_training_data():
-	X_train, Y_train = None, None
+def mixed_training_data(bin_classification=False):
+	X_Y_train = None
+	path1 = os.path.join(PATH, 'mfcc')
+	path2 = os.path.join(PATH, 'prosody')
 
-	example_files = os.listdir(os.path.join(PATH, 'frames'))
-	for f in example_files:
-		if f.endswith('.csv') and f not in TEST_CASES:
+	for i in range(12, 79):
+		if ('rude_%d.csv' % i) not in test_cases:
+			print('training on rude_%d.csv' % i)
+			mfcc_data = np.genfromtxt(os.path.join(path1, 'rude_%d.csv' % i), delimiter=',', skip_header=0)
+			mfcc_data = mfcc_data[:,28:]
+			prosody_data = np.genfromtxt(os.path.join(path2, 'rude_%d.csv' % i), delimiter=',', skip_header=0)
+			prosody_data = prosody_data[:,1:]
+			if mfcc_data.shape[0] < prosody_data.shape[0]:
+				prosody_data = prosody_data[1:,:]
+			assert mfcc_data.shape[0] == prosody_data.shape[0]
 
-			# Extract all examples
-			print('Training on %s' % f)
-			
-			file_data = np.genfromtxt(os.path.join(PATH, 'frames', f), delimiter=',', skip_header=0)
-			label_index = file_data.shape[1] - 1
-
-			if X_train is not None:
-				X_train = np.concatenate((X_train, file_data[:,:label_index]), axis=0)
-				Y_train = np.concatenate((Y_train, file_data[:,label_index]), axis=0)
+			data = np.concatenate((mfcc_data[:,:-1], prosody_data),axis=1)
+			if X_Y_train is not None:
+				X_Y_train = np.concatenate((X_Y_train, data), axis=0)
 			else:
-				X_train = file_data[:,:label_index]
-				Y_train = file_data[:,label_index]
+				X_Y_train = data
+	X_Y_train = np.float32(X_Y_train)
 
-	Y_train = np.float32(Y_train)
-	for i in range(Y_train.shape[0]):
-		if Y_train[i] == 0:
-			Y_train[i] = -1.
-		else:
-			Y_train[i] = 1.
-	return X_train, Y_train
-
-def get_test_data():
-	X_test, Y_test = None, None
-
-	test_files = os.listdir(os.path.join(PATH, 'frames'))
-	for f in test_files:
-		if f in TEST_CASES and f.endswith('.csv'):
-
-			file_data = np.genfromtxt(os.path.join(PATH, 'frames', f), delimiter=',', skip_header=0)
-			label_index = file_data.shape[1] - 1
-
-			if X_test is not None:
-				X_test = np.concatenate((X_test, file_data[:,:label_index]), axis=0)
-				Y_test = np.concatenate((Y_test, file_data[:,label_index]), axis=0)
+	# Binary Classification
+	if bin_classification:
+		label_i = X_Y_train.shape[1] - 1
+		for i in range(X_Y_train.shape[0]):
+			if Y_train[i,label_i] == 0:
+				Y_train[i,label_i] = -1.
 			else:
-				X_test = file_data[:,:label_index]
-				Y_test = file_data[:,label_index]
+				Y_train[i,label_i] = 1.
+	return X_Y_train
 
-	Y_test = np.float32(Y_test)
-	for i in range(Y_test.shape[0]):
-		if Y_test[i] == 0:
-			Y_test[i] = -1.
-		else:
-			Y_test[i] = 1.
-	return X_test, Y_test
+def mixed_test_data(bin_classification=False):
+	X_Y_train = None
+	path1 = os.path.join(PATH, 'mfcc')
+	path2 = os.path.join(PATH, 'prosody')
 
-def mfcc_de_de(reuse):
-	
+	for i in range(12, 79):
+		if ('rude_%d.csv' % i) in test_cases:
+			mfcc_data = np.genfromtxt(os.path.join(path1, 'rude_%d.csv' % i), delimiter=',', skip_header=0)
+			mfcc_data = mfcc_data[:,28:]
+			prosody_data = np.genfromtxt(os.path.join(path2, 'rude_%d.csv' % i), delimiter=',', skip_header=0)
+			prosody_data = prosody_data[:,1:]
+			if mfcc_data.shape[0] < prosody_data.shape[0]:
+				prosody_data = prosody_data[1:,:]
+			assert mfcc_data.shape[0] == prosody_data.shape[0]
 
-	if reuse:
-		# Load SVM model from memory
-		model = svm_load_model(os.path.join(LIBSVM, 'svm_de_de.model'))
+			data = np.concatenate((mfcc_data[:,:-1], prosody_data),axis=1)
+			if X_Y_train is not None:
+				X_Y_train = np.concatenate((X_Y_train, data), axis=0)
+			else:
+				X_Y_train = data
+	X_Y_train = np.float32(X_Y_train)
 
+	# Binary Classification
+	if bin_classification:
+		label_i = X_Y_train.shape[1] - 1
+		for i in range(X_Y_train.shape[0]):
+			if Y_train[i,label_i] == 0:
+				Y_train[i,label_i] = -1.
+			else:
+				Y_train[i,label_i] = 1.
+	return X_Y_train
+
+def get_training_data(t_arg, bin_classification=False):
+	X_Y_train, t_path = None, None
+
+	if t_arg == 0 or t_arg == 3:
+		example_files = os.listdir(os.path.join(PATH, 'mfcc'))
+		t_path = os.path.join(PATH, 'mfcc')
+	elif t_arg == 1:
+		example_files = os.listdir(os.path.join(PATH, 'prosody'))
+		t_path = os.path.join(PATH, 'prosody')
+	elif t_arg == 2:
+		return mixed_training_data()
 	else:
-		# Train SVM classifier and make predictions
-		# Get Training Data
-		X_train, Y_train = get_training_data()
-		X_train = X_train[:,28:40].reshape(-1, 12)
+		exit(0)
+
+	for f in example_files:
+		if f.endswith('.csv') and f not in test_cases:
+
+			print('training on %s' % f)
+			file_data = np.genfromtxt(os.path.join(t_path, f), delimiter=',', skip_header=0)
+
+			if X_Y_train is not None:
+				X_Y_train = np.concatenate((X_Y_train, file_data), axis=0)
+			else:
+				X_Y_train = file_data
+	X_Y_train = np.float32(X_Y_train)
+
+	if t_arg == 0:
+		X_Y_train = X_Y_train[:,28:].reshape(-1,13)
+	elif t_arg == 1:
+		X_Y_train = X_Y_train[:,1:].reshape(-1,7)
+	elif t_arg == 3:
+		X_Y_train = X_Y_train[:,1:].reshape(-1,40)
+
+	# Binary Classification
+	if bin_classification:
+		label_i = X_Y_train.shape[1] - 1
+		for i in range(X_Y_train.shape[0]):
+			if Y_train[i,label_i] == 0:
+				Y_train[i,label_i] = -1.
+			else:
+				Y_train[i,label_i] = 1.
+	return X_Y_train
+
+def get_test_data(t_arg, bin_classification=False):
+	X_Y_test, t_path = None, None
+
+	if t_arg == 0 or t_arg == 3:
+		example_files = os.listdir(os.path.join(PATH, 'mfcc'))
+		t_path = os.path.join(PATH, 'mfcc')
+	elif t_arg == 1:
+		example_files = os.listdir(os.path.join(PATH, 'prosody'))
+		t_path = os.path.join(PATH, 'prosody')
+	elif t_arg == 2:
+		return mixed_test_data()
+
+	for f in example_files:
+		if f.endswith('.csv') and f in test_cases:
+
+			file_data = np.genfromtxt(os.path.join(t_path, f), delimiter=',', skip_header=0)
+
+			if X_Y_test is not None:
+				X_Y_test = np.concatenate((X_Y_test, file_data), axis=0)
+			else:
+				X_Y_test = file_data
+	X_Y_test = np.float32(X_Y_test)
+
+	if t_arg == 0:
+		X_Y_test = X_Y_test[:,28:].reshape(-1,13)
+	elif t_arg == 1:
+		X_Y_test = X_Y_test[:,1:].reshape(-1,7)
+	elif t_arg == 3:
+		X_Y_test = X_Y_test[:,1:].reshape(-1,40)
+
+	# Binary Classification
+	if bin_classification:
+		label_i = X_Y_test.shape[1] - 1
+		for i in range(X_Y_test.shape[0]):
+			if Y_test[i,label_i] == 0:
+				Y_test[i,label_i] = -1.
+			else:
+				Y_test[i,label_i] = 1.
+	return X_Y_test
+
+def trim_examples(A, target):
+	""" Randomly remove rows from A (2D numpy array) until it only contains sample rows. """
+	if A.shape[0] > target:
+		while A.shape[0] > target:
+			num_to_del = A.shape[0] - target
+			t = np.random.randint(0, A.shape[0], num_to_del)
+			A = np.delete(A, t, axis=0)
+	return A
+
+def main(t_arg, reuse=False):
+	"""
+	t_arg: which features to train SVM on.
+	reuse: load most recently trained model iff True
+	"""
+	if reuse:
+		model = svm_load_model(os.path.join(LIBSVM, 'svm.model'))
+	else:
+		# Load training data
+		X_Y_train = get_training_data(t_arg)
+		
+		# Trim examples for each class
+		X_Y_train_0 = trim_examples(X_Y_train[X_Y_train[:,-1]==0,:], 7000)
+		X_Y_train_1 = trim_examples(X_Y_train[X_Y_train[:,-1]==1,:], 4000)
+		X_Y_train_2 = trim_examples(X_Y_train[X_Y_train[:,-1]==2,:], 3000)
+		X_Y_train_3 = trim_examples(X_Y_train[X_Y_train[:,-1]==2,:], 1200)
+
+		X_Y_train = np.concatenate((X_Y_train_0, X_Y_train_1, X_Y_train_2, X_Y_train_3), axis=0)
+		np.random.shuffle(X_Y_train)
 
 		# Convert to python standard data types
-		X_train = np.ndarray.tolist(X_train)
-		Y_train = np.ndarray.tolist(Y_train)
+		if t_arg == 0:
+			X_train = np.ndarray.tolist(X_Y_train[:,:12])
+			Y_train = np.ndarray.tolist(X_Y_train[:,12])
+		elif t_arg == 1:
+			X_train = np.ndarray.tolist(X_Y_train[:,:6])
+			Y_train = np.ndarray.tolist(X_Y_train[:,6])
+		elif t_arg == 2:
+			X_train = np.ndarray.tolist(X_Y_train[:,:18])
+			Y_train = np.ndarray.tolist(X_Y_train[:,18])
+		elif t_arg == 3:
+			X_train = np.ndarray.tolist(X_Y_train[:,:39])
+			Y_train = np.ndarray.tolist(X_Y_train[:,39])
 
-		print(Y_train)
+		# Train SVM
+		model = svm_train(Y_train, X_train, '-t 0')
+		svm_save_model(os.path.join(LIBSVM, 'svm.model'), model)
 
-		model = svm_train(Y_train, X_train)
+	# Load test data
+	X_Y_test = get_test_data(t_arg)
+	if t_arg == 0:
+		X_test = np.ndarray.tolist(X_Y_test[:,:12])
+		Y_test = np.ndarray.tolist(X_Y_test[:,12])
+	elif t_arg == 1:
+		X_test = np.ndarray.tolist(X_Y_test[:,:6])
+		Y_test = np.ndarray.tolist(X_Y_test[:,6])
+	elif t_arg == 2:
+		X_test = np.ndarray.tolist(X_Y_test[:,:18])
+		Y_test = np.ndarray.tolist(X_Y_test[:,18])
+	elif t_arg == 3:
+		X_test = np.ndarray.tolist(X_Y_test[:,:39])
+		Y_test = np.ndarray.tolist(X_Y_test[:,39])
 
-	# Get Test Data
-	X_test, Y_test = get_test_data()
-	X_test = X_test[:,28:40].reshape(-1, 12)
-	X_test = np.ndarray.tolist(X_test)
-	Y_test = np.ndarray.tolist(Y_test)
-
-	# Make predictions
+	# Make predictions using trained model
 	p_label, p_acc, p_val = svm_predict(Y_test, X_test, model)
-	np.savetxt(os.path.join(LIBSVM, 'stats.csv'), Y_test, delimiter=',')
-
+	
 	# Apply smoothing function
-	p_label_smooth = smooth(p_label, B)
-
-	# Save model
-	svm_save_model(os.path.join(LIBSVM, 'svm_de_de.model'), model)
+	p_label_smooth = smooth(p_label)
 
 	# Save predictions
 	comparison = np.concatenate((np.array(p_label_smooth).reshape(-1,1), np.array(p_label).reshape(-1,1), np.array(Y_test).reshape(-1,1)), axis=1)
-	np.savetxt(os.path.join(LIBSVM, 'labels.csv'), comparison, delimiter=',')
-
-def mfcc_de():
-	# Get Training Data
-	X_train, Y_train = get_training_data()
-	X_train = X_train[:,15:27].reshape(-1, 12)
-
-	# Get Test Data
-	X_test, Y_test = get_test_data()
-	X_test = X_test[:,15:27].reshape(-1, 12)
-
-	# Convert to python standard data types
-	X_train = np.ndarray.tolist(X_train)
-	X_test = np.ndarray.tolist(X_test)
-	Y_train = np.ndarray.tolist(Y_train)
-	Y_test = np.ndarray.tolist(Y_test)
-
-	# Train SVM classifier and make predictions
-	model = svm_train(Y_train, X_train)
-	p_label, p_acc, p_val = svm_predict(Y_test, X_test, model)
-
-	# Save predictions
-	p_label = np.array(p_label)
-	comparison = np.concatenate((np.array(p_label).reshape(-1,1), np.array(Y_test).reshape(-1,1)), axis=1)
-	np.savetxt(os.path.join(PATH, 'frames', 'labels.csv'), comparison, delimiter=',')
-
-def mfcc():
-	# Get Training Data
-	X_train, Y_train = get_training_data()
-	X_train = X_train[:,2:14].reshape(-1, 12)
-
-	# Get Test Data
-	X_test, Y_test = get_test_data()
-	X_test = X_test[:,2:14].reshape(-1, 12)
-
-	# Convert to python standard data types
-	X_train = np.ndarray.tolist(X_train)
-	X_test = np.ndarray.tolist(X_test)
-	Y_train = np.ndarray.tolist(Y_train)
-	Y_test = np.ndarray.tolist(Y_test)
-
-	# Train SVM classifier and make predictions
-	model = svm_train(Y_train, X_train)
-	p_label, p_acc, p_val = svm_predict(Y_test, X_test, model)
-
-	# Save predictions
-	p_label = np.array(p_label)
-	np.savetxt(os.path.join(PATH, 'frames', 'labels.csv'), p_label, delimiter=',')
+	np.savetxt(os.path.join(LIBSVM, 'output_%d.csv' % t_arg), comparison, delimiter=',')
 
 if __name__ == '__main__':
-	if len(sys.argv) > 1:
-		mfcc_de_de(int(sys.argv[1]))
-	else:
-		mfcc_de_de(0)
+
+	# Test Examples
+	data = dict({1:[14, 15, 17, 18, 19, 21, 26, 27, 29, 30, 31, 32, 34, 35, 37, 38, 41, 54, 56, 58, 60, 63, 64, 66, 69, 70, 71, 73, 75, 76, 77, 78],
+		2:[12, 13, 22, 23, 35, 46, 51, 53, 55],
+		3:[16, 20, 24, 28, 39, 40, 42, 44, 47]})
+
+	test_cases = list()
+	test_cases.append('rude_%d.csv' % np.random.choice(data[1]))
+	test_cases.append('rude_%d.csv' % np.random.choice(data[2]))
+	test_cases.append('rude_%d.csv' % np.random.choice(data[3]))
+
+	if len(sys.argv) != 2:
+		exit(0)
+	
+	t_arg = int(sys.argv[1])
+	main(t_arg)
