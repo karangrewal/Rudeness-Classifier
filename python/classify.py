@@ -54,7 +54,7 @@ def scale(X, rmin=None, rmax=None, type_scale=1):
 	N = np.nan_to_num(N)
 	return N, rmin, rmax
 
-def mixed_training_data(bin_classification=False):
+def mixed_training_data(test_cases):
 	X_Y_train = None
 	path1 = os.path.join(PATH, 'mfcc')
 	path2 = os.path.join(PATH, 'prosody')
@@ -79,7 +79,7 @@ def mixed_training_data(bin_classification=False):
 
 	return X_Y_train
 
-def mixed_test_data():
+def mixed_test_data(test_cases):
 	X_Y_train = None
 	path1 = os.path.join(PATH, 'mfcc')
 	path2 = os.path.join(PATH, 'prosody')
@@ -103,7 +103,7 @@ def mixed_test_data():
 
 	return X_Y_train
 
-def get_training_data(t_arg):
+def get_training_data(t_arg, test_cases):
 	X_Y_train, t_path = None, None
 
 	if t_arg == 0 or t_arg == 3:
@@ -113,7 +113,7 @@ def get_training_data(t_arg):
 		example_files = os.listdir(os.path.join(PATH, 'prosody'))
 		t_path = os.path.join(PATH, 'prosody')
 	elif t_arg == 2:
-		return mixed_training_data()
+		return mixed_training_data(test_cases)
 	else:
 		exit(0)
 
@@ -138,7 +138,7 @@ def get_training_data(t_arg):
 
 	return X_Y_train
 
-def get_test_data(t_arg):
+def get_test_data(t_arg, test_cases):
 	X_Y_test, t_path = None, None
 
 	if t_arg == 0 or t_arg == 3:
@@ -148,7 +148,7 @@ def get_test_data(t_arg):
 		example_files = os.listdir(os.path.join(PATH, 'prosody'))
 		t_path = os.path.join(PATH, 'prosody')
 	elif t_arg == 2:
-		return mixed_test_data()
+		return mixed_test_data(test_cases)
 
 	for f in example_files:
 		if f.endswith('.csv') and f in test_cases:
@@ -202,7 +202,7 @@ def train_direct(t_arg, reuse=False, normalize=True, bin_classification=False):
 		model = svm_load_model(os.path.join(LIBSVM, 'svm.model'))
 	else:
 		# Load training data
-		X_Y_train = get_training_data(t_arg)
+		X_Y_train = get_training_data(t_arg, test_cases)
 		
 		# Trim examples for each class
 		X_Y_train_0 = trim_examples(X_Y_train[X_Y_train[:,-1]==0,:], 15000)
@@ -244,7 +244,7 @@ def train_direct(t_arg, reuse=False, normalize=True, bin_classification=False):
 		svm_save_model(os.path.join(LIBSVM, 'svm.model'), model)
 
 	# Load test data
-	X_Y_test = get_test_data(t_arg)
+	X_Y_test = get_test_data(t_arg, test_cases)
 	if bin_classification:
 		X_Y_test = apply_bin_labels(X_Y_test)
 
@@ -279,129 +279,6 @@ def train_direct(t_arg, reuse=False, normalize=True, bin_classification=False):
 	comparison = np.concatenate((np.array(p_label_smooth).reshape(-1,1), np.array(p_label).reshape(-1,1), np.array(Y_test).reshape(-1,1)), axis=1)
 	np.savetxt(os.path.join(LIBSVM, 'output_%d.csv' % t_arg), comparison, delimiter=',')
 
-def train_multi_tier(t_arg, normalize=True):
-	"""
-	Train and make predictions using a two-tier model.
-	Only supports type 2 features.
-
-	t_arg: which features to train SVM on
-	normalize: scale data values to the interval [0,1]
-	"""
-	if t_arg != 2:
-		exit(0)
-
-	####################################################
-	################ TRAIN TIER-ONE SVM ################
-	####################################################
-	print('===\n... TRAINING TIER 1 CLASSIFIER ...\n===')
-	rmin, rmax = None, None
-
-	# Load training data
-	X_Y_train = get_training_data(t_arg)
-
-	# Trim examples for each class
-	X_Y_train_0 = trim_examples(X_Y_train[X_Y_train[:,-1]==0,:], 15000)
-	X_Y_train_1 = trim_examples(X_Y_train[X_Y_train[:,-1]==1,:], 5000)
-	X_Y_train_2 = trim_examples(X_Y_train[X_Y_train[:,-1]==2,:], 3200)
-	X_Y_train_3 = trim_examples(X_Y_train[X_Y_train[:,-1]==3,:], 1300)
-
-	X_Y_train = np.concatenate((X_Y_train_0, X_Y_train_1, X_Y_train_2, X_Y_train_3), axis=0)
-	np.random.shuffle(X_Y_train)
-
-	# Apply binary labels
-	X_Y_train = apply_bin_labels(X_Y_train)
-
-	# Convert to python standard data types
-	if normalize:
-		X_train, rmin, rmax = scale(X_Y_train[:,:-1], rmin, rmax)
-		X_train = np.ndarray.tolist(X_train)
-	else:
-		X_train = np.ndarray.tolist(X_Y_train[:,:-1])
-	Y_train = np.ndarray.tolist(X_Y_train[:,-1])
-	
-	# Train tier-one SVM
-	model_1 = svm_train(Y_train, X_train, '-g 0.5')
-	svm_save_model(os.path.join(LIBSVM, 'svm_tier1.model'), model_1)
-
-	# Load test data
-	X_Y_test = get_test_data(t_arg)
-	
-	# Assign indices for future reference of individual training points
-	#X_Y_test = np.concatenate((X_Y_test[:,:-1], np.arange(X_Y_test.shape[0]).reshape(-1,1), X_Y_test[:,-1].reshape(-1,1)), axis=1)
-	
-	# Binary labels
-	X_Y_test_bin = apply_bin_labels(X_Y_test)
-	
-	if normalize:
-		X_test, rmin, rmax = scale(X_Y_test_bin[:,:-1], rmin, rmax)
-		X_test = np.ndarray.tolist(X_test)
-	else:
-		X_test = np.ndarray.tolist(X_Y_test_bin[:,:-1])
-	Y_test = np.ndarray.tolist(X_Y_test_bin[:,-1])
-
-	# Make predictions using trained model
-	p_label, p_acc, p_val = svm_predict(Y_test, X_test, model_1)
-
-	# Apply smoothing function
-	p_label_smooth = smooth(p_label)
-	
-	# Only keep examples that were classified as +1
-	X_Y_test = np.concatenate((X_Y_test, np.array(p_label).reshape(-1,1)), axis=1)
-	X_Y_test = X_Y_test[X_Y_test[:,-1]>0,:]
-	X_Y_test = X_Y_test[:,:-1]
-
-	# Save predictions
-	comparison = np.concatenate((np.array(p_label_smooth).reshape(-1,1), np.array(p_label).reshape(-1,1), np.array(Y_test).reshape(-1,1)), axis=1)
-	np.savetxt(os.path.join(LIBSVM, 'output_tier1.csv'), comparison, delimiter=',')
-
-	####################################################
-	################ TRAIN TIER-TWO SVM ################
-	####################################################
-	print('===\n... TRAINING TIER 2 CLASSIFIER ...\n===')
-	rmin, rmax = None, None
-	X_Y_train_1 = trim_examples(X_Y_train_1, 3500)
-	X_Y_train_2 = trim_examples(X_Y_train_2, 3200)
-	X_Y_train_3 = trim_examples(X_Y_train_3, 1300)
-	X_Y_train = np.concatenate((X_Y_train_1, X_Y_train_2, X_Y_train_3), axis=0)
-	np.random.shuffle(X_Y_train)
-
-	# s = X_Y_train_1.shape[0] + X_Y_train_2.shape[0] + X_Y_train_3.shape[0]
-	# print(1. * X_Y_train_1.shape[0] / s)
-	# print(1. * X_Y_train_2.shape[0] / s)
-	# print(1. * X_Y_train_3.shape[0] / s)	
-
-	# Convert to python standard data types
-	# if normalize:
-	# 	X_train, rmin, rmax = scale(X_Y_train[:,:18], rmin, rmax)
-	# 	X_train = np.ndarray.tolist(X_train)
-	# else:
-	X_train = np.ndarray.tolist(X_Y_train[:,:18])
-	Y_train = np.ndarray.tolist(X_Y_train[:,18])
-
-	np.savetxt(os.path.join(LIBSVM, 'y_train_2.csv'), X_Y_train[:,18], delimiter=',')
-
-	# Train tier-two SVM
-	model_2 = svm_train(Y_train, X_train)
-	svm_save_model(os.path.join(LIBSVM, 'svm_tier2.model'), model_2)
-	
-	# Already normalized data
-	# if normalize:
-	# 	X_test, rmin, rmax = scale(X_Y_test[:,:-1], rmin, rmax)
-	# 	X_test = np.ndarray.tolist(X_test)
-	# else:
-	X_test = np.ndarray.tolist(X_Y_test[:,:-1])
-	Y_test = np.ndarray.tolist(X_Y_test[:,-1])
-	
-	# Make predictions using tier-two SVM
-	p_label, p_acc, p_val = svm_predict(Y_test, X_test, model_2)
-	
-	# Apply smoothing function
-	p_label_smooth = smooth(p_label)
-
-	# Save predictions
-	comparison = np.concatenate((np.array(p_label_smooth).reshape(-1,1), np.array(p_label).reshape(-1,1), np.array(Y_test).reshape(-1,1)), axis=1)
-	np.savetxt(os.path.join(LIBSVM, 'output_tier2.csv'), comparison, delimiter=',')
-	
 if __name__ == '__main__':
 
 	# Test Examples
@@ -418,5 +295,5 @@ if __name__ == '__main__':
 		exit(0)
 	
 	t_arg = int(sys.argv[1])
-	#train_direct(t_arg, bin_classification=True)
-	train_multi_tier(t_arg)
+	train_direct(t_arg, bin_classification=True)
+	
