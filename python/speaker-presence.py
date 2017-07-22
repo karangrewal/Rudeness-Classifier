@@ -1,5 +1,7 @@
 """
-Not using batch frames as inputs.
+Determine if someone is speaking
+1. SVM Classifier
+2. Neural Network
 """
 
 from lasagne.layers import DenseLayer, InputLayer
@@ -15,24 +17,21 @@ from theano import function
 import theano.tensor as T
 
 ALPHA = 2e-4
-BATCH_SIZE = 32
+BATCH_SIZE = 64
 DATA_PATH = '/Users/karangrewal/documents/developer/rudeness-classifier/conversations/mfcc-2'
-DATA_SIZE = 20000
-DIM_H1 = 80
-DIM_H2 = 60
+DATA_SIZE = 15000
+DIM_H1 = 64
+DIM_H2 = 32
 EPOCHS = 40
 L2_REGULARIZATION = True
-LR = 0.1
+LR = 0.2
 PROB_SELECT_AS_TEST = 0.1
 NUM_FEATURES = 13
 MFCC_NUM = 1
 OUT_PATH = ''
-WEIGHT_CONSTRAINT = True
 
-def get_data(n=DATA_SIZE, same=10000, diff=10000):
+def get_data(n=DATA_SIZE):
     ''' Files have 42 cols '''
-    if same + diff != n:
-        exit(0)
     print('GATHERING DATA ...')
     x_y_train, x_y_test = None, None
     example_files = os.listdir(DATA_PATH)
@@ -62,9 +61,9 @@ def get_data(n=DATA_SIZE, same=10000, diff=10000):
     
     assert x_y_test.shape[0] > 0
     x_y_train, x_y_test = np.float32(x_y_train), np.float32(x_y_test)
-    x_y_train = x_y_train[x_y_train[:,41]!=0,:]
-    x_y_test = x_y_test[x_y_test[:,41]!=0,:]
-
+    x_y_train[x_y_train[:,41]>0,41] = 1.
+    x_y_test[x_y_test[:,41]>0,41] = 1.
+    
     # Select data
     if MFCC_NUM == 1:
         x_y_train = x_y_train[:,np.r_[1:14, 41]]
@@ -75,75 +74,35 @@ def get_data(n=DATA_SIZE, same=10000, diff=10000):
     elif MFCC_NUM == 3:
         x_y_train = x_y_train[:,np.r_[27:40, 41]]
         x_y_test = x_y_test[:,np.r_[27:40, 41]]
-
-    # Randomly select 2 examples and create data
-    n_same, n_diff = 0, 0
-    train_data = np.zeros(shape=(0, 2*NUM_FEATURES+1))
-    test_data = np.zeros(shape=(0, 2*NUM_FEATURES+1))
-    train_speakers, test_speakers = list(), list()
-
-    # Generate Training Data
-    while n_same + n_diff < n:
-        a, b = np.random.randint(0, x_y_train.shape[0]), np.random.randint(0, x_y_train.shape[0])
-        x1, x2 = x_y_train[a].reshape(x_y_train.shape[1]), x_y_train[b,:].reshape(x_y_train.shape[1])
-
-        if x1[-1] == x2[-1] and n_same < same:
-            n_same += 1
-            train_speakers.append(x1[-1])
-            train_speakers.append(x2[-1])
-            train_data = np.append(train_data, np.concatenate((x1[:-1], x2)).reshape(-1, 2*NUM_FEATURES+1), axis=0)
-            train_data[-1,-1] = 1
-        elif x1[-1] != x2[-1] and n_diff < diff:
-            n_diff += 1
-            train_speakers.append(x1[-1])
-            train_speakers.append(x2[-1])
-            train_data = np.append(train_data, np.concatenate((x1[:-1], x2)).reshape(-1, 2*NUM_FEATURES+1), axis=0)
-            train_data[-1,-1] = 0
-
-    # Generate Test Data
-    # Pairs consist of MFCC pairs which are 0.1s apart
-    for x1, x2 in zip(x_y_test[100:,:], x_y_test[:x_y_test.shape[0]-100,:]):
-
-        test_data = np.append(test_data, np.concatenate((x1[:-1], x2)).reshape(-1, 2*NUM_FEATURES+1), axis=0)
-        test_speakers.append(x1[-1])
-        test_speakers.append(x2[-1])
-        if x1[-1] == x2[-1]:
-            test_data[-1,-1] = 1
-        elif x1[-1] != x2[-1]:
-            test_data[-1,-1] = 0
-
-    # Print Speakers
-    print('Training Data Speakers: %s' % np.sort(np.unique(np.array(train_speakers))))
-    print('Test Data Speakers: %s' % np.sort(np.unique(np.array(test_speakers))))
-
-    # Split training and test data
-    np.random.shuffle(train_data)
-    return train_data, test_data
+    
+    np.random.shuffle(x_y_train)
+    print('Training Distribution: 0: %.1f, 1: %.1f' % (100. * x_y_train[x_y_train[:n,-1]==0,:].shape[0] / n, 100. * x_y_train[x_y_train[:n,-1]==1,:].shape[0] / n))
+    return x_y_train[:n,:], x_y_test
 
 def network(input_var=None):
-    ann = InputLayer(shape=(None, 2*NUM_FEATURES), input_var=input_var)
-    ann = DenseLayer(ann, DIM_H1)#, nonlinearity=sigmoid)
-    ann = DenseLayer(ann, DIM_H2)#, nonlinearity=sigmoid)
-    ann = DenseLayer(ann, 2, nonlinearity=softmax)
-    return ann
+    net = InputLayer(shape=(None, NUM_FEATURES), input_var=input_var)
+    net = DenseLayer(net, DIM_H1)#, nonlinearity=sigmoid)
+    net = DenseLayer(net, DIM_H2)#, nonlinearity=sigmoid)
+    net = DenseLayer(net, 2, nonlinearity=softmax)
+    return net
 
 if __name__ == '__main__':
 
     x = T.fmatrix()
     t = T.fvector()
-    ann = network(x)
+    net = network(x)
 
-    prediction = get_output(ann)[:,1]
+    prediction = get_output(net)[:,1]
     predict = function([x], outputs=prediction)
 
     loss = binary_crossentropy(prediction, t).mean()
 
     # L2 regularization
     if L2_REGULARIZATION:
-        l2_penalty = ALPHA * regularize_network_params(ann, l2)
+        l2_penalty = ALPHA * regularize_network_params(net, l2)
         loss += l2_penalty.mean()
     
-    updates = sgd(loss_or_grads=loss, params=get_all_params(ann, trainable=True), learning_rate=LR)
+    updates = sgd(loss_or_grads=loss, params=get_all_params(net, trainable=True), learning_rate=LR)
     train = function([x, t], outputs=loss, updates=updates, allow_input_downcast=True, mode='FAST_COMPILE')
 
     # Load data
@@ -154,11 +113,14 @@ if __name__ == '__main__':
     train_data[:,:-1] = (train_data[:,:-1] - np.mean(train_data[:,:-1], axis=0)) / np.std(train_data[:,:-1], axis=0)
     test_data[:,:-1] = (test_data[:,:-1] - np.mean(train_data[:,:-1], axis=0)) / np.std(train_data[:,:-1], axis=0)
 
+    # Scale between -1 and 1
+    # train_data[:,:-1] = train_data[:,:-1] / (np.max(train_data[:,:-1], axis=0) - np.min(train_data[:,:-1], axis=0))
+    # test_data[:,:-1] = test_data[:,:-1] / (np.max(train_data[:,:-1], axis=0) - np.min(train_data[:,:-1], axis=0))
+
     print('STARTING TRAINING ...')
     for epoch in range(EPOCHS):
         
         # Reorder data
-        # loss = np.zeros(shape=(DATA_SIZE/BATCH_SIZE))
         loss = np.zeros(shape=(0))
         np.random.shuffle(train_data)
         for i in range(0, DATA_SIZE, BATCH_SIZE):
@@ -166,25 +128,14 @@ if __name__ == '__main__':
             x_i = train_data[i:i+BATCH_SIZE,:-1]
             t_i = train_data[i:i+BATCH_SIZE,-1]
             loss = np.append(loss, np.array([train(x_i, t_i)]))
-            # print(train(x_i, t_i))
-
-            # Constrain weights
-            params = get_all_params(ann)
-            if WEIGHT_CONSTRAINT:
-                w = params[0].get_value()
-                w[:NUM_FEATURES, DIM_H1/2:].fill(0.)
-                w[NUM_FEATURES:, :DIM_H1/2].fill(0.)
-                params[0].set_value(w)
-
+            
         if (epoch+1) % 5 == 0:
             print('Epoch {}/{}: Loss={}'.format(epoch+1, EPOCHS, np.average(loss)))
+            params = get_all_params(net)
             print('\tAvg. W1: {}'.format(np.average(params[0].get_value())))
             print('\tAvg. b1: {}'.format(np.average(params[1].get_value())))
             print('\tAvg. W2: {}'.format(np.average(params[2].get_value())))
             print('\tAvg. b2: {}'.format(np.average(params[3].get_value())))
-
-        # Record weights
-        # np.savez(os.path.join(OUT_PATH, 'w_%d' % (epoch+1)), params[0].get_value())
 
     print('MAKING PREDICTIONS ...')
 
@@ -212,4 +163,4 @@ if __name__ == '__main__':
     print('Test Accuracy: {}%'.format(acc))
 
     # Save results
-    np.savetxt(os.path.join(OUT_PATH, 'ann_results_%s.txt' % sys.argv[1]), Y, delimiter=',')
+    np.savetxt(os.path.join(OUT_PATH, 'speaker-presence.csv'), Y, delimiter=',')

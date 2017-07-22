@@ -1,5 +1,5 @@
 """
-Not using batch frames as inputs.
+Replicating Experiment in: https://infoscience.epfl.ch/record/203865/files/Yella_SLT_2014.pdf
 """
 
 from lasagne.layers import DenseLayer, InputLayer
@@ -7,29 +7,31 @@ from lasagne.layers import get_all_params, get_output, get_all_layers
 from lasagne.nonlinearities import leaky_rectify, linear, rectify, sigmoid, softmax, LeakyRectify
 from lasagne.objectives import binary_crossentropy
 from lasagne.regularization import l2, regularize_network_params
-from lasagne.updates import sgd
+from lasagne.updates import adam, rmsprop, sgd
 import numpy as np
 import os
 import sys
 from theano import function
 import theano.tensor as T
 
-ALPHA = 2e-4
+ALPHA = 2e-3
 BATCH_SIZE = 32
+COMPARISON_FRAMES = 100
 DATA_PATH = '/Users/karangrewal/documents/developer/rudeness-classifier/conversations/mfcc-2'
-DATA_SIZE = 20000
-DIM_H1 = 80
-DIM_H2 = 60
-EPOCHS = 40
+DATA_SIZE = 14000
+DIM_H1 = 300
+DIM_H2 = 250
+EPOCHS = 35
 L2_REGULARIZATION = True
-LR = 0.1
+LR = 0.01
 PROB_SELECT_AS_TEST = 0.1
 NUM_FEATURES = 13
 MFCC_NUM = 1
 OUT_PATH = ''
 WEIGHT_CONSTRAINT = True
+WINDOW_SIZE = 4
 
-def get_data(n=DATA_SIZE, same=10000, diff=10000):
+def get_data(n=DATA_SIZE, same=7000, diff=7000):
     ''' Files have 42 cols '''
     if same + diff != n:
         exit(0)
@@ -78,35 +80,47 @@ def get_data(n=DATA_SIZE, same=10000, diff=10000):
 
     # Randomly select 2 examples and create data
     n_same, n_diff = 0, 0
-    train_data = np.zeros(shape=(0, 2*NUM_FEATURES+1))
-    test_data = np.zeros(shape=(0, 2*NUM_FEATURES+1))
+    train_data = np.zeros(shape=(0, 2*WINDOW_SIZE*NUM_FEATURES+1))
+    test_data = np.zeros(shape=(0, 2*WINDOW_SIZE*NUM_FEATURES+1))
     train_speakers, test_speakers = list(), list()
-
+    
     # Generate Training Data
     while n_same + n_diff < n:
-        a, b = np.random.randint(0, x_y_train.shape[0]), np.random.randint(0, x_y_train.shape[0])
-        x1, x2 = x_y_train[a].reshape(x_y_train.shape[1]), x_y_train[b,:].reshape(x_y_train.shape[1])
+        a, b = np.random.randint(0, x_y_train.shape[0]-WINDOW_SIZE), np.random.randint(0, x_y_train.shape[0]-WINDOW_SIZE)
+        if x_y_train[a,-1] != x_y_train[a+WINDOW_SIZE,-1] or x_y_train[b,-1] != x_y_train[b+WINDOW_SIZE,-1]:
+            continue
+        
+        x1 = np.concatenate((x_y_train[a:a+WINDOW_SIZE,:-1].flatten(), x_y_train[a:a+1,-1]))
+        x2 = np.concatenate((x_y_train[b:b+WINDOW_SIZE,:-1].flatten(), x_y_train[b:b+1,-1]))
 
         if x1[-1] == x2[-1] and n_same < same:
             n_same += 1
             train_speakers.append(x1[-1])
             train_speakers.append(x2[-1])
-            train_data = np.append(train_data, np.concatenate((x1[:-1], x2)).reshape(-1, 2*NUM_FEATURES+1), axis=0)
+            train_data = np.append(train_data, np.concatenate((x1[:-1], x2)).reshape(-1, 2*WINDOW_SIZE*NUM_FEATURES+1), axis=0)
             train_data[-1,-1] = 1
         elif x1[-1] != x2[-1] and n_diff < diff:
             n_diff += 1
             train_speakers.append(x1[-1])
             train_speakers.append(x2[-1])
-            train_data = np.append(train_data, np.concatenate((x1[:-1], x2)).reshape(-1, 2*NUM_FEATURES+1), axis=0)
+            train_data = np.append(train_data, np.concatenate((x1[:-1], x2)).reshape(-1, 2*WINDOW_SIZE*NUM_FEATURES+1), axis=0)
             train_data[-1,-1] = 0
 
+        if n_same + n_diff % 2000 == 0:
+            print(n_same + n_diff)
+    
     # Generate Test Data
     # Pairs consist of MFCC pairs which are 0.1s apart
-    for x1, x2 in zip(x_y_test[100:,:], x_y_test[:x_y_test.shape[0]-100,:]):
+    for i in range(x_y_test.shape[0] - COMPARISON_FRAMES - WINDOW_SIZE + 1):
+        if np.unique(x_y_test[i:i+WINDOW_SIZE,-1]).shape[0] != 1 or np.unique(x_y_test[i+COMPARISON_FRAMES:i+COMPARISON_FRAMES+WINDOW_SIZE,-1]).shape[0] != 1:
+            continue
 
-        test_data = np.append(test_data, np.concatenate((x1[:-1], x2)).reshape(-1, 2*NUM_FEATURES+1), axis=0)
+        x1 = np.concatenate((x_y_test[i:i+WINDOW_SIZE,:-1].flatten(), x_y_test[i:i+1,-1]))
+        x2 = np.concatenate((x_y_test[i+COMPARISON_FRAMES:i+COMPARISON_FRAMES+WINDOW_SIZE,:-1].flatten(), x_y_test[i+COMPARISON_FRAMES:i+101,-1]))
+        test_data = np.append(test_data, np.concatenate((x1[:-1], x2)).reshape(-1, 2*WINDOW_SIZE*NUM_FEATURES+1), axis=0)
         test_speakers.append(x1[-1])
         test_speakers.append(x2[-1])
+
         if x1[-1] == x2[-1]:
             test_data[-1,-1] = 1
         elif x1[-1] != x2[-1]:
@@ -117,13 +131,12 @@ def get_data(n=DATA_SIZE, same=10000, diff=10000):
     print('Test Data Speakers: %s' % np.sort(np.unique(np.array(test_speakers))))
 
     # Split training and test data
-    np.random.shuffle(train_data)
     return train_data, test_data
 
 def network(input_var=None):
-    ann = InputLayer(shape=(None, 2*NUM_FEATURES), input_var=input_var)
-    ann = DenseLayer(ann, DIM_H1)#, nonlinearity=sigmoid)
-    ann = DenseLayer(ann, DIM_H2)#, nonlinearity=sigmoid)
+    ann = InputLayer(shape=(None, 2*WINDOW_SIZE*NUM_FEATURES), input_var=input_var)
+    ann = DenseLayer(ann, DIM_H1, nonlinearity=sigmoid)
+    ann = DenseLayer(ann, DIM_H2, nonlinearity=sigmoid)
     ann = DenseLayer(ann, 2, nonlinearity=softmax)
     return ann
 
@@ -142,7 +155,7 @@ if __name__ == '__main__':
     if L2_REGULARIZATION:
         l2_penalty = ALPHA * regularize_network_params(ann, l2)
         loss += l2_penalty.mean()
-    
+
     updates = sgd(loss_or_grads=loss, params=get_all_params(ann, trainable=True), learning_rate=LR)
     train = function([x, t], outputs=loss, updates=updates, allow_input_downcast=True, mode='FAST_COMPILE')
 
@@ -151,8 +164,12 @@ if __name__ == '__main__':
     train_data, test_data = np.float32(train_data), np.float32(test_data)
 
     # Standardize features
-    train_data[:,:-1] = (train_data[:,:-1] - np.mean(train_data[:,:-1], axis=0)) / np.std(train_data[:,:-1], axis=0)
-    test_data[:,:-1] = (test_data[:,:-1] - np.mean(train_data[:,:-1], axis=0)) / np.std(train_data[:,:-1], axis=0)
+    # train_data[:,:-1] = (train_data[:,:-1] - np.mean(train_data[:,:-1], axis=0)) / np.std(train_data[:,:-1], axis=0)
+    # test_data[:,:-1] = (test_data[:,:-1] - np.mean(train_data[:,:-1], axis=0)) / np.std(train_data[:,:-1], axis=0)
+
+    # Scale between -1 and 1
+    train_data[:,:-1] = train_data[:,:-1] / (np.max(train_data[:,:-1], axis=0) - np.min(train_data[:,:-1], axis=0))
+    test_data[:,:-1] = test_data[:,:-1] / (np.max(train_data[:,:-1], axis=0) - np.min(train_data[:,:-1], axis=0))
 
     print('STARTING TRAINING ...')
     for epoch in range(EPOCHS):
@@ -160,7 +177,6 @@ if __name__ == '__main__':
         # Reorder data
         # loss = np.zeros(shape=(DATA_SIZE/BATCH_SIZE))
         loss = np.zeros(shape=(0))
-        np.random.shuffle(train_data)
         for i in range(0, DATA_SIZE, BATCH_SIZE):
             
             x_i = train_data[i:i+BATCH_SIZE,:-1]
@@ -172,16 +188,20 @@ if __name__ == '__main__':
             params = get_all_params(ann)
             if WEIGHT_CONSTRAINT:
                 w = params[0].get_value()
-                w[:NUM_FEATURES, DIM_H1/2:].fill(0.)
-                w[NUM_FEATURES:, :DIM_H1/2].fill(0.)
+                w[:WINDOW_SIZE*NUM_FEATURES, DIM_H1/2:].fill(0.)
+                w[WINDOW_SIZE*NUM_FEATURES:, :DIM_H1/2].fill(0.)
                 params[0].set_value(w)
 
+        print('Epoch {}/{}: Loss={}'.format(epoch+1, EPOCHS, np.average(loss)))
         if (epoch+1) % 5 == 0:
-            print('Epoch {}/{}: Loss={}'.format(epoch+1, EPOCHS, np.average(loss)))
-            print('\tAvg. W1: {}'.format(np.average(params[0].get_value())))
-            print('\tAvg. b1: {}'.format(np.average(params[1].get_value())))
-            print('\tAvg. W2: {}'.format(np.average(params[2].get_value())))
-            print('\tAvg. b2: {}'.format(np.average(params[3].get_value())))
+            # print('\tAvg. W1: {}'.format(np.average(params[0].get_value())))
+            # print('\tAvg. b1: {}'.format(np.average(params[1].get_value())))
+            # print('\tAvg. W2: {}'.format(np.average(params[2].get_value())))
+            # print('\tAvg. b2: {}'.format(np.average(params[3].get_value())))
+            print('\tAvg. W1: {}'.format(np.average(np.absolute(params[0].get_value()))))
+            print('\tAvg. b1: {}'.format(np.average(np.absolute(params[1].get_value()))))
+            print('\tAvg. W2: {}'.format(np.average(np.absolute(params[2].get_value()))))
+            print('\tAvg. b2: {}'.format(np.average(np.absolute(params[3].get_value()))))
 
         # Record weights
         # np.savez(os.path.join(OUT_PATH, 'w_%d' % (epoch+1)), params[0].get_value())
